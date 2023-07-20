@@ -21,8 +21,10 @@ The writer recieves the message and creates a proposals on-chain. Once a proposa
 package ethereum
 
 import (
+	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"os"
 
 	bridge "github.com/ChainSafe/ChainBridge/bindings/Bridge"
 	erc20Handler "github.com/ChainSafe/ChainBridge/bindings/ERC20Handler"
@@ -33,10 +35,13 @@ import (
 	"github.com/ChainSafe/chainbridge-utils/blockstore"
 	"github.com/ChainSafe/chainbridge-utils/core"
 	"github.com/ChainSafe/chainbridge-utils/crypto/secp256k1"
+	secp256k1Crypto "github.com/ethereum/go-ethereum/crypto"
 	"github.com/ChainSafe/chainbridge-utils/keystore"
 	metrics "github.com/ChainSafe/chainbridge-utils/metrics/types"
 	"github.com/ChainSafe/chainbridge-utils/msg"
 	"github.com/ChainSafe/log15"
+	"github.com/awnumar/memguard"
+	coreMemguard "github.com/awnumar/memguard/core"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -90,6 +95,21 @@ func setupBlockstore(cfg *Config, kp *secp256k1.Keypair) (*blockstore.Blockstore
 	return bs, nil
 }
 
+func DecryptPrivateKey(privKey *ecdsa.PrivateKey) ([]byte, error) {
+	privKeyBytes := secp256k1Crypto.FromECDSA(privKey)
+	key := memguard.Enclave{Enclave: &coreMemguard.Enclave{Ciphertext: privKeyBytes}}
+	// Decrypt the result returned from invert
+	keyBuf, err := key.Open()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return nil, err
+	}
+	defer keyBuf.Destroy()
+
+	return keyBuf.Bytes(), nil
+	
+}
+
 func InitializeChain(chainCfg *core.ChainConfig, logger log15.Logger, sysErr chan<- error, m *metrics.ChainMetrics) (*Chain, error) {
 	cfg, err := parseChainConfig(chainCfg)
 	if err != nil {
@@ -100,6 +120,18 @@ func InitializeChain(chainCfg *core.ChainConfig, logger log15.Logger, sysErr cha
 	if err != nil {
 		return nil, err
 	}
+	privKp := kpI.PrivateKey()
+	decryptPrivateKey, err := DecryptPrivateKey(privKp)
+	if err != nil {
+		return nil, err
+	}
+
+	decryptPrivateKeyBytes , err := secp256k1Crypto.ToECDSA(decryptPrivateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	kpI.UpdatePrivateKey(decryptPrivateKeyBytes)
 	kp, _ := kpI.(*secp256k1.Keypair)
 
 	bs, err := setupBlockstore(cfg, kp)
