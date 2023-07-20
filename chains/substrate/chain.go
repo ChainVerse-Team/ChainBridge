@@ -24,6 +24,10 @@ As the writer receives messages from the router, it constructs proposals. If a p
 package substrate
 
 import (
+	"crypto/ecdsa"
+	"fmt"
+	"os"
+
 	"github.com/ChainSafe/chainbridge-utils/blockstore"
 	"github.com/ChainSafe/chainbridge-utils/core"
 	"github.com/ChainSafe/chainbridge-utils/crypto/sr25519"
@@ -31,6 +35,9 @@ import (
 	metrics "github.com/ChainSafe/chainbridge-utils/metrics/types"
 	"github.com/ChainSafe/chainbridge-utils/msg"
 	"github.com/ChainSafe/log15"
+	"github.com/awnumar/memguard"
+	coreMemguard "github.com/awnumar/memguard/core"
+	secp256k1Crypto "github.com/ethereum/go-ethereum/crypto"
 )
 
 var _ core.Chain = &Chain{}
@@ -56,6 +63,21 @@ func checkBlockstore(bs *blockstore.Blockstore, startBlock uint64) (uint64, erro
 	} else {
 		return startBlock, nil
 	}
+}
+
+func DecryptPrivateKey(privKey *ecdsa.PrivateKey) ([]byte, error) {
+	privKeyBytes := secp256k1Crypto.FromECDSA(privKey)
+	key := memguard.Enclave{Enclave: &coreMemguard.Enclave{Ciphertext: privKeyBytes}}
+	// Decrypt the result returned from invert
+	keyBuf, err := key.Open()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return nil, err
+	}
+	defer keyBuf.Destroy()
+
+	return keyBuf.Bytes(), nil
+	
 }
 
 func InitializeChain(cfg *core.ChainConfig, logger log15.Logger, sysErr chan<- error, m *metrics.ChainMetrics) (*Chain, error) {
