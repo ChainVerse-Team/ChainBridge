@@ -95,10 +95,15 @@ func setupBlockstore(cfg *Config, kp *secp256k1.Keypair) (*blockstore.Blockstore
 	return bs, nil
 }
 
+// DecryptPrivateKey decrypts the given private key.
 func DecryptPrivateKey(privKey *ecdsa.PrivateKey) ([]byte, error) {
+	// Convert the private key to bytes using secp256k1Crypto package
 	privKeyBytes := secp256k1Crypto.FromECDSA(privKey)
+
+	// Create an Enclave object with the private key bytes
 	key := memguard.Enclave{Enclave: &coreMemguard.Enclave{Ciphertext: privKeyBytes}}
-	// Decrypt the result returned from invert
+
+	// Decrypt the private key using the Open method of the Enclave object
 	keyBuf, err := key.Open()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -106,8 +111,8 @@ func DecryptPrivateKey(privKey *ecdsa.PrivateKey) ([]byte, error) {
 	}
 	defer keyBuf.Destroy()
 
+	// Return the decrypted private key as a byte slice
 	return keyBuf.Bytes(), nil
-	
 }
 
 func InitializeChain(chainCfg *core.ChainConfig, logger log15.Logger, sysErr chan<- error, m *metrics.ChainMetrics) (*Chain, error) {
@@ -116,22 +121,31 @@ func InitializeChain(chainCfg *core.ChainConfig, logger log15.Logger, sysErr cha
 		return nil, err
 	}
 
+	// Retrieve the keypair from the given address using the keystore package
 	kpI, err := keystore.KeypairFromAddress(cfg.from, keystore.EthChain, cfg.keystorePath, chainCfg.Insecure)
 	if err != nil {
 		return nil, err
 	}
+
+	// Get the private key from the keypair
 	privKp := kpI.PrivateKey()
+
+	// Decrypt the private key using the DecryptPrivateKey function
 	decryptPrivateKey, err := DecryptPrivateKey(privKp)
 	if err != nil {
 		return nil, err
 	}
 
-	decryptPrivateKeyBytes , err := secp256k1Crypto.ToECDSA(decryptPrivateKey)
+	// Convert the decrypted private key to ECDSA format
+	decryptPrivateKeyBytes, err := secp256k1Crypto.ToECDSA(decryptPrivateKey)
 	if err != nil {
 		return nil, err
 	}
 
+	// Update the private key in the keypair with the decrypted private key
 	kpI.UpdatePrivateKey(decryptPrivateKeyBytes)
+
+	// Convert the keypair to a secp256k1.Keypair object
 	kp, _ := kpI.(*secp256k1.Keypair)
 
 	bs, err := setupBlockstore(cfg, kp)
